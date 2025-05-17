@@ -1,6 +1,5 @@
 import streamlit as st
 import re
-from io import BytesIO
 from PyPDF2 import PdfReader
 
 # === Sayfa Ayarı ===
@@ -14,40 +13,19 @@ KANUN_REGEX = (
     r"(?:madde|maddesi)?\s*"                      # Opsiyonel "madde"/"maddesi"
     r"(?P<madde>\d{1,3})\b"                       # 1–3 haneli madde numarası
 )
-
-# === PDF'ten Metin Çekme Fonksiyonu ===
-def oku_pdf(uploaded_file):
-    """
-    Yüklenen PDF dosyasını bellekten okuyup metni birleştirir.
-    """
-    data = uploaded_file.read()
-    reader = PdfReader(BytesIO(data))
-    metin = []
-    for page in reader.pages:
-        text = page.extract_text()
-        if text:
-            metin.append(text)
-    return "\n".join(metin)
-
 # === Kanun Ayıklama Fonksiyonu ===
 def kanunlari_ayikla(metin):
-    """
-    Verilen metinden '1234 sayılı ... madde 12' biçimindeki kanun ve madde referanslarını ayıklar.
-    """
-    eslesenler = re.findall(
-        KANUN_REGEX,
-        metin,
-        flags=re.IGNORECASE | re.DOTALL
-    )
-    # Tekilleştir ve 'kanun/madde' formatında döndür
-    return sorted({f"{k}/{m}" for k, m in eslesenler})
+    eslesenler = re.findall(KANUN_REGEX, metin)
+    return sorted(set(f"{k}/{m}" for k, m in eslesenler))
+
+# === PDF'ten Metin Çek ===
+def oku_pdf(pdf_file):
+    reader = PdfReader(pdf_file)
+    return "\n".join([p.extract_text() or "" for p in reader.pages])
 
 # === Geliştirilmiş Kamu Zararı Tahmini (Regex Destekli) ===
 def kamu_zarari_tahmini(metin):
-    """
-    Basit kalıplar ile kamu zararı var mı yok mu tahmin eder.
-    """
-    text = metin.lower()
+    metin = metin.lower()
 
     zarar_var = [
         r"ödettirilmesine",
@@ -70,41 +48,31 @@ def kamu_zarari_tahmini(metin):
         r"sorumlularından müştereken ve müteselsilen tazminine karar verilmesi uygun olur"
     ]
 
-    # Eğer herhangi bir 'var' kalıbı bulunursa
     for kalip in zarar_var:
-        if re.search(kalip, text):
+        if re.search(kalip, metin):
             return "Kamu Zararı VAR"
 
-    # Eğer herhangi bir 'yok' kalıbı bulunursa
     for kalip in zarar_yok:
-        if re.search(kalip, text):
+        if re.search(kalip, metin):
             return "Kamu Zararı YOK"
 
-    # Tanımlı kalıplar dışında kalanlar
     return "Tahmin edilemedi"
 
 # === PDF Yükleyici Arayüz ===
 pdf_dosyasi = st.file_uploader("📥 PDF Karar Dosyasını Yükleyin", type="pdf")
 
 if pdf_dosyasi:
-    try:
-        # PDF'i oku ve metni al
-        metin = oku_pdf(pdf_dosyasi)
-    except Exception as e:
-        st.error(f"❌ PDF okunurken hata oluştu: {e}")
-        st.stop()
-
-    # Kanun ve madde ayıklama
+    metin = oku_pdf(pdf_dosyasi)
     kanunlar = kanunlari_ayikla(metin)
-    # Kamu zararı tahmini
     zarar = kamu_zarari_tahmini(metin)
 
     st.subheader("🔍 Tahminler")
 
     # === Kanunlar ===
     if kanunlar:
+        virgullu = ", ".join(kanunlar)
         st.success("✅ Tespit Edilen Kanunlar:")
-        st.code(", ".join(kanunlar), language="text")
+        st.code(virgullu, language="text")
     else:
         st.warning("❌ PDF içinde kanun/madde ifadesi bulunamadı.")
 
